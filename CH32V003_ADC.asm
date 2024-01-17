@@ -34,7 +34,7 @@ scratch = 0x20000020
 mem = 0x20000024
 ##########
 sp_init:
-    	li sp, STACK		# initialize stack pointer
+    	li sp, STACK			# initialize stack pointer
 
 
 #Enable GPIO clocks & AFIO in APB2 clock register
@@ -49,7 +49,7 @@ sp_init:
 #Enable ADC prescaler in clock configuration register
 	li x10,R32_RCC_CFGR0
 	lw x11,0(x10)
-	li x7,((1<<11))			# 0b01000 ADC prescalar apb/4 = 8/4 = 2mhz
+	li x7,((8<<11))			# 0b01000 ADC prescalar ahb/4 = 8/4 = 2mhz
 	or x11,x11,x7
 	sw x11,0(x10)
 
@@ -58,7 +58,7 @@ sp_init:
 	lw x11,0(x10)			# load contents from register pointed by x10
 	li x7,~((0xf<<20)|(0xf<<24)|(0xf<<16))	#clear pd4,pd5,pd6. we need to setup PD5 & PD6 for usart tx and rx and pd4 for ADC7
 	and x11,x11,x7			# clear pd4,pd5,pd6 mode and cnf bits for selected pin D4,D5,D6
-	li x7,(0x8<<24)|(0xB<<20)	# pd6 = input with PU/PD,pd5= multiplex pushpull output 50mhz,pd4 floating input for ETR
+	li x7,(0x8<<24)|(0xB<<20)	# pd6 = input with PU/PD,pd5= multiplex pushpull output 50mhz,pd4 analog input for ADC 0b0000
 	or x11,x11,x7			# OR value to register
 	sw x11,0(x10)			# store in R32_GPIOD_CFGLR
 
@@ -81,21 +81,21 @@ sp_init:
 #disable ADC before configuration
 	li x10,R32_ADC_CTLR2
 	lw x11,0(x10)
-	li x7,0xfffffffe		#disable ADON bit
+	li x7,0xfffffffe		#disable ADON bit , 0 written in 0bit
 	and x11,x11,x7
 	sw x11,0(x10)
 
 #set sequence of conversion channel
-	li x10,R32_ADC_RSQR3
+	li x10,R32_ADC_RSQR3		# sequence register, if multiple sensors used we can determine the order of conversion
 	lw x11,0(x10)
-	li x7,(7<<0)			# A7 adc channel is written to sequence 1	
+	li x7,(7<<0)			# AIN7 adc channel is written to sequence 1 (only one channel in this project)	
 	or x11,x11,x7
 	sw x11,0(x10)
 
 #set sampling cycles
-	li x10,R32_ADC_SAMPTR2
+	li x10,R32_ADC_SAMPTR2		# takes sampling cycles for each measurement
 	lw x11,0(x10)
-	li x7,(7<<21)			# A7 adc channel is written to sequence 1	
+	li x7,(7<<21)			# 0b111/0x7 is 241 cycles	
 	or x11,x11,x7
 	sw x11,0(x10)
 
@@ -121,7 +121,7 @@ check1:
 # calibrate ADC
 	li x10,R32_ADC_CTLR2
 	lw x11,0(x10)
-	li x7,(1<<2)			#  calibration	
+	li x7,(1<<2)			# start calibration	
 	or x11,x11,x7
 	sw x11,0(x10)
 check2:
@@ -151,20 +151,20 @@ measure:
 	ori x11,x11,1
 	sw x11,0(x10)
 checkflag:
-	li x10,R32_ADC_STATR
+	li x10,R32_ADC_STATR		# adc status register
 	lw x11,0(x10)
-	andi x11,x11,2
-	beqz x11,checkflag
-	li x10,R32_ADC_RDATAR
-	lw x11,0(x10)
-	li x10,result1
-	sw x11,0(x10)
+	andi x11,x11,2			# adc conversion finish flag mask
+	beqz x11,checkflag		# wait till bit 1 is set
+	li x10,R32_ADC_RDATAR		# ADC data register
+	lw x11,0(x10)			# copy data register
+	li x10,result1			# load address of result1 variable in SRAM
+	sw x11,0(x10)			# store ADC result in result1
 	
-	call D_ASCII
-	call print
-	li x8,' '			# load space (0x20)
+	call D_ASCII			# procedure to convert result to ASCII , subroutine called with x10 pointing to result1 in SRAM
+	call print			# prints result in USART
+	li x8,' '			# load space (0x20) , print space
 	call USART_TX			# call uart
-	li x8,0x0d			# line feed
+	li x8,0x0d			# line feed	
 	call USART_TX			# call uart
 	li x8,0x0a			# carriage feed
 	call USART_TX			# call uart
@@ -179,7 +179,8 @@ blank_line:
 	call USART_TX			# call uart
 
 	call delay			# delay for man in front of terminal
-	j measure
+
+	j measure			# repeat ADC measurement
 #####################################################################
 # SUBROUTINES
 #####################################################################	
@@ -297,7 +298,7 @@ D_ASCII:
 	li x8,0			# clear register
 	li x15,0		# clear register
 	
-#	li x10,0x20000010	# result1
+#	li x10,0x20000010	# result1 (point address of value that has to be converted with x10)
 	lw x4,0(x10)		# copy value from memory pointed by x10 to x4,this routine to be called after pointing to register with required value
 #	li x4,0xffffffff	# 32bit word to be converted into ascii chars
 	li x7,1000000000	# divisor
